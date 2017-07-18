@@ -25,13 +25,172 @@ using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.Runtime;
+using Autodesk.AutoCAD.Colors;
 
 using AcAp = Autodesk.AutoCAD.ApplicationServices.Application;
+
 
 namespace SsiCad
 {
     public class Commands
-    {        
+    {
+        string nameSociety = "OTEIS";
+
+        [CommandMethod("ZD")]
+        public void Zone_Desenfumage()
+        {
+            Document acDoc = AcAp.DocumentManager.MdiActiveDocument;
+            Database acCurDb = acDoc.Database;
+
+            //Saisie utilisateur: récupère le numéro de la ZD
+            PromptStringOptions pStrOpts = new PromptStringOptions("\nNuméro de la zone de désenfumage");
+            pStrOpts.AllowSpaces = true;
+            PromptResult pStrRes = acDoc.Editor.GetString(pStrOpts);
+
+            // Exit if the user presses ESC or cancels the command
+            if (pStrRes.Status == PromptStatus.Cancel)
+                return;
+
+            //Création des Claques pour la ZD si il n'existe pas
+            //Démarre une transaction
+            using (Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
+            {
+                // Open the Layer table for read
+                LayerTable acLyrTbl;
+                acLyrTbl = acTrans.GetObject(acCurDb.LayerTableId,
+                                   OpenMode.ForRead) as LayerTable;
+
+                string sLayerNameG = string.Format("0 {0} SI PRO P - ZD{1} G", nameSociety, pStrRes.StringResult);
+                string sLayerNameH = string.Format("0 {0} SI PRO P - ZD{1} H", nameSociety, pStrRes.StringResult);
+                string sLayerNameT = string.Format("0 {0} SI PRO P - ZD{1} T", nameSociety, pStrRes.StringResult);
+
+                List<string> lLayerName = new List<string>();
+                lLayerName.Add(sLayerNameG);
+                lLayerName.Add(sLayerNameH);
+                lLayerName.Add(sLayerNameT);
+
+                foreach (string sLayerName in lLayerName)
+                {
+                    if (acLyrTbl.Has(sLayerName) == false)
+                    {
+                        LayerTableRecord acLyrTblRec = new LayerTableRecord();
+
+                        // Assign the layer the ACI color 1 and a name
+                        acLyrTblRec.Color = Color.FromColorIndex(ColorMethod.ByAci, 1);
+                        acLyrTblRec.Name = sLayerName;
+
+                        // Upgrade the Layer table for write
+                        acLyrTbl.UpgradeOpen();
+
+                        // Append the new layer to the Layer table and the transaction
+                        acLyrTbl.Add(acLyrTblRec);
+                        acTrans.AddNewlyCreatedDBObject(acLyrTblRec, true);
+                    }
+                }
+
+                // Save the changes and dispose of the transaction
+                acTrans.Commit();
+            }
+
+            //Création d'une zone
+            PromptKeywordOptions pKeyOpts = new PromptKeywordOptions("");
+            pKeyOpts.Message = string.Format("\nCréation d'une polyligne pour la zone ZD{0} ", pStrRes.StringResult);
+            pKeyOpts.Keywords.Add("Oui");
+            pKeyOpts.Keywords.Add("Non");
+            pKeyOpts.Keywords.Default = "Oui";
+            pKeyOpts.AllowNone = false;
+
+            PromptResult pKeyRes = acDoc.Editor.GetKeywords(pKeyOpts);
+
+            // Exit if the user presses ESC or cancels the command
+            if (pKeyRes.Status == PromptStatus.Cancel)
+                return;
+            switch (pKeyRes.StringResult)
+            {
+                case "Oui":
+                    #region
+                    // Saisie du premier point
+                    PromptPointOptions ppo = new PromptPointOptions("\nPoint de départ: ");
+                    PromptPointResult ppr = acDoc.Editor.GetPoint(ppo);
+                    if (ppr.Status != PromptStatus.OK)
+                        return;
+
+                    // Déplacement du SCU si le Z du point est différent de 0.0
+                    Matrix3d ucs = acDoc.Editor.CurrentUserCoordinateSystem;
+                    Point3d p0 = ppr.Value;
+                    if (p0.Z != 0.0)
+                    {
+                        Vector3d disp = new Vector3d(0.0, 0.0, p0.Z).TransformBy(ucs);
+                        acDoc.Editor.CurrentUserCoordinateSystem = ucs.PreMultiplyBy(Matrix3d.Displacement(disp));
+                    }
+                    // Elevation de la polyligne
+                    double elev = p0
+                        .TransformBy(ucs)
+                        .TransformBy(Matrix3d.WorldToPlane(ucs.CoordinateSystem3d.Zaxis))
+                        .Z;
+
+                    // Plan de construction
+                    Plane plane = new Plane(Point3d.Origin, ucs.CoordinateSystem3d.Zaxis);
+                    // Saisie du second point
+                    ppo.Message = "\nPoint suivant: ";
+                    ppo.BasePoint = p0;
+                    ppo.UseBasePoint = true;
+                    ppo.AllowNone = true;
+                    ppr = acDoc.Editor.GetPoint(ppo);
+                    if (ppr.Status != PromptStatus.OK)
+                        return;
+
+                    Point3d pt = ppr.Value;
+                    try
+                    {
+                        // Création de la polyligne à 2 sommets
+                        ObjectId plId = ObjectId.Null;
+                        int i = 1;
+                        using (Transaction tr = acCurDb.TransactionManager.StartTransaction())
+                        {
+                            Polyline pline = new Polyline();
+                            pline.Normal = ucs.CoordinateSystem3d.Zaxis;
+                            pline.Elevation = elev;
+                            pline.AddVertexAt(0, p0.TransformBy(ucs).Convert2d(plane), 0.0, 0.0, 0.0);
+                            pline.AddVertexAt(1, pt.TransformBy(ucs).Convert2d(plane), 0.0, 0.0, 0.0);
+                            BlockTableRecord btr =
+                                (BlockTableRecord)tr.GetObject(acCurDb.CurrentSpaceId, OpenMode.ForWrite);
+                            plId = btr.AppendEntity(pline);
+                            tr.AddNewlyCreatedDBObject(pline, true);
+                            tr.Commit();
+                        }
+                        // Ajout des points suivants
+                        while (true)
+                        {
+                            ppo.BasePoint = pt;
+                            ppr = acDoc.Editor.GetPoint(ppo);
+                            if (ppr.Status != PromptStatus.OK)
+                                break;
+
+                            pt = ppr.Value;
+                            i++;
+
+                            using (Transaction tr = acCurDb.TransactionManager.StartTransaction())
+                            {
+                                Polyline pl = (Polyline)tr.GetObject(plId, OpenMode.ForWrite);
+                                pl.AddVertexAt(i, pt.TransformBy(ucs).Convert2d(plane), 0.0, 0.0, 0.0);
+                                tr.Commit();
+                            }
+                        }
+                    }
+                    catch (System.Exception e)
+                    {
+                        acDoc.Editor.WriteMessage("\nErreur: {0}", e.Message);
+                    }
+                    finally
+                    {
+                        acDoc.Editor.CurrentUserCoordinateSystem = ucs;
+                    }
+                    break;
+                    #endregion
+            }
+        }    
+
         [CommandMethod("Cline")]
         public void Create_Line()
         {
@@ -46,8 +205,8 @@ namespace SsiCad
             // Saisie du premier point
             pPtOpts.Message = "\nSpécifiez le premier point: ";
             pPtRes = acDoc.Editor.GetPoint(pPtOpts);
-            lstPt.Add(pPtRes.Value);           
-            
+            lstPt.Add(pPtRes.Value);
+
             // Exit if the user presses ESC or cancels the command
             if (pPtRes.Status == PromptStatus.Cancel)
             {
@@ -56,7 +215,7 @@ namespace SsiCad
 
             // Déplacement du SCU si le Z du point est différent de 0.0
 
-            Matrix3d ucs = acDoc.Editor.CurrentUserCoordinateSystem;            
+            Matrix3d ucs = acDoc.Editor.CurrentUserCoordinateSystem;
             if (pPtRes.Value.Z != 0.0)
             {
                 Vector3d disp = new Vector3d(0.0, 0.0, pPtRes.Value.Z).TransformBy(ucs);
@@ -67,10 +226,10 @@ namespace SsiCad
             {
                 int i = 1;
                 Boolean clickPoint = true;
-                
+
                 while (clickPoint == true)
                 {
-                    switch(lstPt.Count)
+                    switch (lstPt.Count)
                     {
                         case 0:
                             pPtOpts.Message = "\nSpécifiez le premier point: ";
@@ -81,25 +240,25 @@ namespace SsiCad
                             pPtOpts.Keywords.Clear();
                             pPtOpts.Keywords.Add("annUler");
                             pPtOpts.UseBasePoint = true;
-                            pPtOpts.BasePoint = lstPt[i-1];
+                            pPtOpts.BasePoint = lstPt[i - 1];
                             break;
                         case 2:
                             pPtOpts.Keywords.Clear();
                             pPtOpts.Keywords.Add("annUler");
-                            pPtOpts.BasePoint = lstPt[i-1];                            
+                            pPtOpts.BasePoint = lstPt[i - 1];
                             break;
                         case 3:
                             pPtOpts.Message = "\nSpécifiez le point suivant ou ";
                             pPtOpts.Keywords.Clear();
                             pPtOpts.Keywords.Add("annUler");
                             pPtOpts.Keywords.Add("Clore");
-                            pPtOpts.BasePoint = lstPt[i-1];
+                            pPtOpts.BasePoint = lstPt[i - 1];
                             break;
-                    }                    
+                    }
 
                     if (lstPt.Count >= 4)
                     {
-                        pPtOpts.BasePoint = lstPt[i-1];
+                        pPtOpts.BasePoint = lstPt[i - 1];
                     }
 
                     // Saisie du point suivant                    
@@ -166,7 +325,7 @@ namespace SsiCad
 
                                         // Define the new line
                                         Line acLine = new Line();
-                                        acLine.StartPoint = lstPt[i-1];
+                                        acLine.StartPoint = lstPt[i - 1];
                                         acLine.EndPoint = lstPt[0];
 
                                         acLine.SetDatabaseDefaults();
@@ -185,7 +344,7 @@ namespace SsiCad
                                 case "annUler":
                                     if (lstAcLine.Count == 0)
                                     {
-                                        lstPt.RemoveAt(i-1);
+                                        lstPt.RemoveAt(i - 1);
                                         i--;
                                     }
                                     else
@@ -219,7 +378,7 @@ namespace SsiCad
                             break;
                         case PromptStatus.Cancel:
                             return;
-                    }                    
+                    }
                 }
             }
             catch (System.Exception e)
