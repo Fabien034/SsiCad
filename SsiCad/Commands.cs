@@ -56,6 +56,10 @@ namespace SsiCad
 
             //Création des Claques pour la ZD si il n'existe pas
             //Démarre une transaction
+            string sLayerNameG;
+            string sLayerNameH;
+            string sLayerNameT;
+            
             using (Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
             {
                 // Open the Layer table for read
@@ -63,9 +67,9 @@ namespace SsiCad
                 acLyrTbl = acTrans.GetObject(acCurDb.LayerTableId,
                                    OpenMode.ForRead) as LayerTable;
 
-                string sLayerNameG = string.Format("0 {0} SI PRO P - ZD{1} G", nameSociety, pStrRes.StringResult);
-                string sLayerNameH = string.Format("0 {0} SI PRO P - ZD{1} H", nameSociety, pStrRes.StringResult);
-                string sLayerNameT = string.Format("0 {0} SI PRO P - ZD{1} T", nameSociety, pStrRes.StringResult);
+                sLayerNameG = string.Format("0 {0} SI PRO P - ZD{1} G", nameSociety, pStrRes.StringResult);
+                sLayerNameH = string.Format("0 {0} SI PRO P - ZD{1} H", nameSociety, pStrRes.StringResult);
+                sLayerNameT = string.Format("0 {0} SI PRO P - ZD{1} T", nameSociety, pStrRes.StringResult);
 
                 List<string> lLayerName = new List<string>();
                 lLayerName.Add(sLayerNameG);
@@ -104,21 +108,34 @@ namespace SsiCad
             pKeyOpts.Keywords.Default = "Oui";
             pKeyOpts.AllowNone = false;
 
-            pKeyRes = acDoc.Editor.GetKeywords(pKeyOpts);
-
-
+            pKeyRes = acDoc.Editor.GetKeywords(pKeyOpts);            
+                        
             // Exit if the user presses ESC or cancels the command
             if (pKeyRes.Status == PromptStatus.Cancel)
                 return;
 
-            switch (pKeyRes.StringResult)
+            // Boucle tant que l'on veut créer une zone avec le même numéro
+            bool createZone = true;
+            while (createZone)
             {
-                case "Oui":
-                    Create_Pline();
-                    break;
+                switch (pKeyRes.StringResult)
+                {
+                    case "Oui":
+                        //Démarre une transaction
+                        Polyline acPline = new Polyline();
+                        acPline = Create_Pline(sLayerNameG);
+                        pKeyRes = acDoc.Editor.GetKeywords(pKeyOpts);
+                        if (pKeyRes.StringResult == "Non")
+                        {
+                            createZone = false;
+                            return;
+                        }
+                        break;
 
-                case "non":
-                    return;
+                    case "Non":
+                        createZone = false;
+                        return;
+                }
             }
 
         }
@@ -329,9 +346,11 @@ namespace SsiCad
         }
 
         /// <summary>
-        /// Création d'une ou plusieurs Polyligne
+        /// Création d'un Polyligne sur un calque défini
         /// </summary>
-        static void Create_Pline()
+        /// <param name="layerName">Nom du claque</param>
+        /// <returns></returns>
+        static Polyline Create_Pline(string layerName)
         {            
             Document acDoc = AcAp.DocumentManager.MdiActiveDocument;
             Database acCurDb = acDoc.Database;
@@ -354,7 +373,7 @@ namespace SsiCad
                 // Exit if the user presses ESC or cancels the command
                 if (pPtRes.Status == PromptStatus.Cancel)
                 {
-                    return;
+                    return acPline;
                 }          
 
                 // Déplacement du SCU si le Z du point est différent de 0.0
@@ -385,6 +404,7 @@ namespace SsiCad
                     acPline.SetDatabaseDefaults();
                     acPline.Normal = ucs.CoordinateSystem3d.Zaxis;
                     acPline.Elevation = elev;
+                    acPline.Layer = layerName;
                     acPline.AddVertexAt(0, pPtRes.Value.TransformBy(ucs).Convert2d(plane), 0.0, 0.0, 0.0);
 
                     // Add the line to the drawing
@@ -440,7 +460,7 @@ namespace SsiCad
                     switch (pPtRes.Status)
                     {
                         case PromptStatus.Cancel:
-                            return;
+                            return acPline;
                         case PromptStatus.OK:
                             using (Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
                             {
@@ -505,7 +525,7 @@ namespace SsiCad
             {
                 acDoc.Editor.CurrentUserCoordinateSystem = ucs;
             }
-
+            return acPline;
 
         }
 
