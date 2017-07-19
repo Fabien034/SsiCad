@@ -36,6 +36,9 @@ namespace SsiCad
     {
         string nameSociety = "OTEIS";
 
+        /// <summary>
+        /// Création d'une zone de désenfumage
+        /// </summary>
         [CommandMethod("ZD")]
         public void Zone_Desenfumage()
         {
@@ -91,21 +94,33 @@ namespace SsiCad
                 // Save the changes and dispose of the transaction
                 acTrans.Commit();
             }
-            Create_Line();
             
             //Création d'une zone
             PromptKeywordOptions pKeyOpts = new PromptKeywordOptions("");
+            PromptResult pKeyRes;
             pKeyOpts.Message = string.Format("\nCréation d'une polyligne pour la zone ZD{0} ", pStrRes.StringResult);
             pKeyOpts.Keywords.Add("Oui");
             pKeyOpts.Keywords.Add("Non");
             pKeyOpts.Keywords.Default = "Oui";
             pKeyOpts.AllowNone = false;
 
-            PromptResult pKeyRes = acDoc.Editor.GetKeywords(pKeyOpts);
+            pKeyRes = acDoc.Editor.GetKeywords(pKeyOpts);
+
 
             // Exit if the user presses ESC or cancels the command
             if (pKeyRes.Status == PromptStatus.Cancel)
-                return;            
+                return;
+
+            switch (pKeyRes.StringResult)
+            {
+                case "Oui":
+                    Create_Pline();
+                    break;
+
+                case "non":
+                    return;
+            }
+
         }
 
         /// <summary>
@@ -147,7 +162,8 @@ namespace SsiCad
                 int i = 1;
                 Boolean clickPoint = true;
 
-                while (clickPoint == true)
+                // Boucle tant que l'utilisateur veut rajouter des lignes
+                while (clickPoint)
                 {
                     switch (lstPt.Count)
                     {
@@ -174,11 +190,9 @@ namespace SsiCad
                             pPtOpts.Keywords.Add("Clore");
                             pPtOpts.BasePoint = lstPt[i - 1];
                             break;
-                    }
-
-                    if (lstPt.Count >= 4)
-                    {
-                        pPtOpts.BasePoint = lstPt[i - 1];
+                        default:
+                            pPtOpts.BasePoint = lstPt[i - 1];
+                            break;
                     }
 
                     // Saisie du point suivant                    
@@ -315,23 +329,29 @@ namespace SsiCad
         }
 
         /// <summary>
-        /// Création d'une Polyligne
+        /// Création d'une ou plusieurs Polyligne
         /// </summary>
-        /// <returns>Retourne l'object polylignes créées</returns>
-        static void Create_Pline()
+        /// <returns>Retourne la liste des polylignes créées</returns>
+        static List<Polyline> Create_Pline_save()
         {
             Document acDoc = AcAp.DocumentManager.MdiActiveDocument;
             Database acCurDb = acDoc.Database;
+            Polyline acPline = new Polyline();
+            List<Polyline> lAcPline = new List<Polyline>(); 
+
+            PromptPointResult pPtRes;
+            PromptPointOptions pPtOpts = new PromptPointOptions("");
 
             // Saisie du premier point
-            PromptPointOptions ppo = new PromptPointOptions("\nPoint de départ: ");
-            PromptPointResult ppr = acDoc.Editor.GetPoint(ppo);
-            if (ppr.Status != PromptStatus.OK)
-                return;
+            pPtOpts.Message = "\nSpécifiez le point de départ: ";
+
+            pPtRes = acDoc.Editor.GetPoint(pPtOpts);
+            if (pPtRes.Status != PromptStatus.OK)
+               return lAcPline;
 
             // Déplacement du SCU si le Z du point est différent de 0.0
             Matrix3d ucs = acDoc.Editor.CurrentUserCoordinateSystem;
-            Point3d p0 = ppr.Value;
+            Point3d p0 = pPtRes.Value;
             if (p0.Z != 0.0)
             {
                 Vector3d disp = new Vector3d(0.0, 0.0, p0.Z).TransformBy(ucs);
@@ -345,52 +365,53 @@ namespace SsiCad
 
             // Plan de construction
             Plane plane = new Plane(Point3d.Origin, ucs.CoordinateSystem3d.Zaxis);
-            // Saisie du second point
-            ppo.Message = "\nPoint suivant: ";
-            ppo.BasePoint = p0;
-            ppo.UseBasePoint = true;
-            ppo.AllowNone = true;
-            ppr = acDoc.Editor.GetPoint(ppo);
-            if (ppr.Status != PromptStatus.OK)
-                return;
 
-            Point3d pt = ppr.Value;
+            // Saisie du second point
+            pPtOpts.Message = "\nSpécifiez le point suivant: ";
+            pPtOpts.BasePoint = p0;
+            pPtOpts.UseBasePoint = true;
+            pPtOpts.AllowNone = true;
+            pPtRes = acDoc.Editor.GetPoint(pPtOpts);
+            if (pPtRes.Status != PromptStatus.OK)
+                return lAcPline;
+
+            Point3d pt = pPtRes.Value;
             try
             {
                 // Création de la polyligne à 2 sommets
                 ObjectId plId = ObjectId.Null;
                 int i = 1;
-                using (Transaction tr = acCurDb.TransactionManager.StartTransaction())
-                {
-                    Polyline pline = new Polyline();
-                    pline.Normal = ucs.CoordinateSystem3d.Zaxis;
-                    pline.Elevation = elev;
-                    pline.AddVertexAt(0, p0.TransformBy(ucs).Convert2d(plane), 0.0, 0.0, 0.0);
-                    pline.AddVertexAt(1, pt.TransformBy(ucs).Convert2d(plane), 0.0, 0.0, 0.0);
+                using (Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
+                {                    
+                    acPline.Normal = ucs.CoordinateSystem3d.Zaxis;
+                    acPline.Elevation = elev;
+                    acPline.AddVertexAt(0, p0.TransformBy(ucs).Convert2d(plane), 0.0, 0.0, 0.0);
+                    acPline.AddVertexAt(1, pt.TransformBy(ucs).Convert2d(plane), 0.0, 0.0, 0.0);
                     BlockTableRecord btr =
-                        (BlockTableRecord)tr.GetObject(acCurDb.CurrentSpaceId, OpenMode.ForWrite);
-                    plId = btr.AppendEntity(pline);
-                    tr.AddNewlyCreatedDBObject(pline, true);
-                    tr.Commit();
+                        (BlockTableRecord)acTrans.GetObject(acCurDb.CurrentSpaceId, OpenMode.ForWrite);
+                    plId = btr.AppendEntity(acPline);
+                    acTrans.AddNewlyCreatedDBObject(acPline, true);
+                    acTrans.Commit();
                 }
                 // Ajout des points suivants
                 while (true)
                 {
-                    ppo.BasePoint = pt;
-                    ppr = acDoc.Editor.GetPoint(ppo);
-                    if (ppr.Status != PromptStatus.OK)
+                    pPtOpts.BasePoint = pt;
+                    pPtRes = acDoc.Editor.GetPoint(pPtOpts);
+                    if (pPtRes.Status != PromptStatus.OK)
                         break;
 
-                    pt = ppr.Value;
+                    pt = pPtRes.Value;
                     i++;
 
-                    using (Transaction tr = acCurDb.TransactionManager.StartTransaction())
+                    using (Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
                     {
-                        Polyline pl = (Polyline)tr.GetObject(plId, OpenMode.ForWrite);
+                        Polyline pl = (Polyline)acTrans.GetObject(plId, OpenMode.ForWrite);
                         pl.AddVertexAt(i, pt.TransformBy(ucs).Convert2d(plane), 0.0, 0.0, 0.0);
-                        tr.Commit();
+                        acTrans.Commit();
                     }
                 }
+                lAcPline.Add(acPline);
             }
             catch (System.Exception e)
             {
@@ -399,7 +420,191 @@ namespace SsiCad
             finally
             {
                 acDoc.Editor.CurrentUserCoordinateSystem = ucs;
-            }                       
+            }
+            return lAcPline;
         }
+
+        /// <summary>
+        /// Création d'une ou plusieurs Polyligne
+        /// </summary>
+        static void Create_Pline()
+        {
+            Document acDoc = AcAp.DocumentManager.MdiActiveDocument;
+            Database acCurDb = acDoc.Database;
+
+            List<Point3d> lstPt = new List<Point3d>();
+            Polyline acPline = new Polyline();
+
+            PromptPointResult pPtRes;
+            PromptPointOptions pPtOpts = new PromptPointOptions("");
+
+            // Saisie du premier point
+            pPtOpts.Message = "\nSpécifiez le premier point :";
+            pPtRes = acDoc.Editor.GetPoint(pPtOpts);
+
+            // Exit if the user presses ESC or cancels the command
+            if (pPtRes.Status == PromptStatus.Cancel)
+            {
+                return;
+            }
+
+            //Ajoute le point dans la liste des points
+            lstPt.Add(pPtRes.Value);
+
+            // Déplacement du SCU si le Z du point est différent de 0.0
+            Matrix3d ucs = acDoc.Editor.CurrentUserCoordinateSystem;
+            Point3d p0 = pPtRes.Value;
+            if (p0.Z != 0.0)
+            {
+                Vector3d disp = new Vector3d(0.0, 0.0, p0.Z).TransformBy(ucs);
+                acDoc.Editor.CurrentUserCoordinateSystem = ucs.PreMultiplyBy(Matrix3d.Displacement(disp));
+            }
+            // Elevation de la polyligne
+            double elev = p0
+                .TransformBy(ucs)
+                .TransformBy(Matrix3d.WorldToPlane(ucs.CoordinateSystem3d.Zaxis))
+                .Z;
+            // Plan de construction
+            Plane plane = new Plane(Point3d.Origin, ucs.CoordinateSystem3d.Zaxis);
+
+            try
+            {
+                int i = 1;
+                bool clickPoint = true;
+                //ObjectId acPlineId = ObjectId.Null;
+
+                // Boucle tant que l'utilisateur veut cliquer des points
+                while (clickPoint)
+                {
+                    switch (lstPt.Count)
+                    {
+                        case 0:
+                            pPtOpts.Message = "\nSpécifiez le premier point: ";
+                            pPtOpts.UseBasePoint = false;
+                            break;
+                        case 1:
+                            pPtOpts.Message = "\nSpécifiez le point suivant";
+                            pPtOpts.Keywords.Clear();
+                            //pPtOpts.Keywords.Add("annUler");
+                            pPtOpts.UseBasePoint = true;
+                            pPtOpts.BasePoint = lstPt[i - 1];
+                            break;
+                        case 2:
+                            pPtOpts.Keywords.Clear();
+                            pPtOpts.Keywords.Add("annUler");
+                            pPtOpts.BasePoint = lstPt[i - 1];
+                            break;
+                        case 3:
+                            pPtOpts.Message = "\nSpécifiez le point suivant ou ";
+                            pPtOpts.Keywords.Clear();
+                            pPtOpts.Keywords.Add("annUler");
+                            pPtOpts.Keywords.Add("Clore");
+                            pPtOpts.BasePoint = lstPt[i - 1];
+                            break;
+                        default:
+                            pPtOpts.BasePoint = lstPt[i - 1];
+                            break;
+                    }
+                    //Saisie du point suivant
+                    pPtRes = acDoc.Editor.GetPoint(pPtOpts);
+                    
+
+                    switch (pPtRes.Status)
+                    {
+                        case PromptStatus.Cancel:
+                            return;
+                        case PromptStatus.OK:
+                            if (lstPt.Count == 0)
+                            {
+                                lstPt.Add(pPtRes.Value);
+                            }
+                            else if (lstPt.Count == 1)
+                            {
+                                //start a transaction
+                                using(Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
+                                {
+                                    BlockTable acBlkTbl;
+                                    BlockTableRecord acBlkTblRec;
+                                    
+                                    // Open Model space for write
+                                    acBlkTbl = acTrans.GetObject(acCurDb.BlockTableId,
+                                                                 OpenMode.ForRead) as BlockTable;
+                                    acBlkTblRec = acTrans.GetObject(acBlkTbl[BlockTableRecord.ModelSpace],
+                                                                    OpenMode.ForWrite) as BlockTableRecord;
+
+                                    // Define the new Pline
+                                    acPline.SetDatabaseDefaults();
+                                    acPline.Normal = ucs.CoordinateSystem3d.Zaxis;
+                                    acPline.Elevation = elev;
+                                    acPline.AddVertexAt(0, lstPt[0].TransformBy(ucs).Convert2d(plane), 0.0, 0.0, 0.0);
+                                    acPline.AddVertexAt(1, pPtRes.Value.TransformBy(ucs).Convert2d(plane), 0.0, 0.0, 0.0);
+
+                                    // Add the line to the drawing
+                                    //acPlineId = acBlkTblRec.AppendEntity(acPline);
+                                    acBlkTblRec.AppendEntity(acPline);
+                                    acTrans.AddNewlyCreatedDBObject(acPline, true);
+
+                                    // Commit the changes and dispose of the transaction
+                                    acTrans.Commit();
+                                }
+                                lstPt.Add(pPtRes.Value);
+                                i++;
+                            }
+                            else
+                            {
+                                using (Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
+                                {
+                                    //Polyline pl = (Polyline)acTrans.GetObject(acPline.ObjectId, OpenMode.ForWrite);
+                                    acTrans.GetObject(acPline.ObjectId, OpenMode.ForWrite);
+                                    acPline.AddVertexAt(i, pPtRes.Value.TransformBy(ucs).Convert2d(plane), 0.0, 0.0, 0.0);
+                                    acTrans.Commit();
+                                }
+                                lstPt.Add(pPtRes.Value);
+                                i++;
+                            }
+                            break;
+                        case PromptStatus.Keyword:
+                            switch (pPtRes.StringResult)
+                            {
+                                case "Clore":
+                                    using (Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
+                                    {
+                                        acTrans.GetObject(acPline.ObjectId, OpenMode.ForWrite);
+                                        acPline.AddVertexAt(i, lstPt[0].TransformBy(ucs).Convert2d(plane), 0.0, 0.0, 0.0);
+                                        // Close the polyline
+                                        acPline.Closed = true;
+                                        acTrans.Commit();
+                                    }                                    
+                                    i++;
+                                    clickPoint = false;
+                                    break;
+                                case "annUler":
+                                    using (Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
+                                    {
+                                        acTrans.GetObject(acPline.ObjectId, OpenMode.ForWrite);
+                                        acPline.RemoveVertexAt(i - 1);
+                                        acTrans.Commit();
+                                    }
+                                    lstPt.RemoveAt(i - 1);
+                                    i--;
+                                    break;
+                            }
+                            break;
+                    }
+                }
+                // Fin de la boucle
+            }
+            catch (System.Exception e)
+            {
+                acDoc.Editor.WriteMessage("\nErreur: {0}", e.Message);
+            }
+            finally
+            {
+                acDoc.Editor.CurrentUserCoordinateSystem = ucs;
+            }
+
+
+        }
+
     }
 }
