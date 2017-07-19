@@ -121,9 +121,49 @@ namespace SsiCad
                 switch (pKeyRes.StringResult)
                 {
                     case "Oui":
-                        //Démarre une transaction
+                        //Création d'une Polyligne sur le calque sLayerNameG
                         Polyline acPline = new Polyline();
                         acPline = Create_Pline(sLayerNameG);
+
+                        //Création d'une hachure solid associé à la polyligne sur le calque sLayerNameH
+                        //Démarre une transaction
+                        using (Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
+                        {
+                            // Open the Block table for read
+                            BlockTable acBlkTbl;
+                            acBlkTbl = acTrans.GetObject(acCurDb.BlockTableId,
+                                                            OpenMode.ForRead) as BlockTable;
+
+                            // Open the Block table record Model space for write
+                            BlockTableRecord acBlkTblRec;
+                            acBlkTblRec = acTrans.GetObject(acBlkTbl[BlockTableRecord.ModelSpace],
+                                                            OpenMode.ForWrite) as BlockTableRecord;
+
+                            // Adds the pline to an object id array
+                            ObjectIdCollection acObjIdColl = new ObjectIdCollection();
+                            acObjIdColl.Add(acPline.ObjectId);
+
+                            // Create the hatch object and append it to the block table record
+                            using (Hatch acHatch = new Hatch())
+                            {
+                                acBlkTblRec.AppendEntity(acHatch);
+                                acTrans.AddNewlyCreatedDBObject(acHatch, true);
+
+                                // Set the properties of the hatch object
+                                // Associative must be set after the hatch object is appended to the 
+                                // block table record and before AppendLoop
+                                acHatch.SetHatchPattern(HatchPatternType.PreDefined, "SOLID");
+                                acHatch.Layer = sLayerNameH;
+                                acHatch.Associative = true;
+                                acHatch.AppendLoop(HatchLoopTypes.Outermost, acObjIdColl);
+                                acHatch.EvaluateHatch(true);
+                            }
+
+                            // Save the changes and dispose of the transaction
+                            acTrans.Commit();
+                        }
+
+                        //Demande si l'utilisateur veut recréer une zone
                         pKeyRes = acDoc.Editor.GetKeywords(pKeyOpts);
                         if (pKeyRes.StringResult == "Non")
                         {
