@@ -14,6 +14,8 @@ You should have received a copy of the GNU General Public License along
 with this program; if not, write to the Free Software Foundation, Inc.,
 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.*/
 
+/*Version 0.01 - 20/07/2017*/
+
 
 using System;
 using System.Collections.Generic;
@@ -26,6 +28,7 @@ using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.Runtime;
 using Autodesk.AutoCAD.Colors;
+using Autodesk.AutoCAD.Windows;
 
 using AcAp = Autodesk.AutoCAD.ApplicationServices.Application;
 
@@ -75,6 +78,21 @@ namespace SsiCad
                 lLayerName.Add(sLayerNameG);
                 lLayerName.Add(sLayerNameH);
                 lLayerName.Add(sLayerNameT);
+                Color acColor = new Color();
+
+                if (acLyrTbl.Has(sLayerNameG) == false)
+                {
+                    // Assign the layer the ACI color 1 and a name
+                    ColorDialog colorDialog = new ColorDialog();
+                    colorDialog.SetDialogTabs(
+                        ColorDialog.ColorTabs.ACITab |
+                        ColorDialog.ColorTabs.TrueColorTab |
+                        ColorDialog.ColorTabs.ColorBookTab);
+                    colorDialog.IncludeByBlockByLayer = true;
+                    colorDialog.Color = null;                    
+                    colorDialog.ShowDialog();
+                    acColor = colorDialog.Color;
+                }
 
                 foreach (string sLayerName in lLayerName)
                 {
@@ -82,9 +100,20 @@ namespace SsiCad
                     {
                         LayerTableRecord acLyrTblRec = new LayerTableRecord();
 
-                        // Assign the layer the ACI color 1 and a name
-                        acLyrTblRec.Color = Color.FromColorIndex(ColorMethod.ByAci, 1);
-                        acLyrTblRec.Name = sLayerName;
+                        if (sLayerName != sLayerNameT)
+                        {
+
+                            //acLyrTblRec.Color = Color.FromColorIndex(ColorMethod.ByAci, 151);
+                            acLyrTblRec.Color = acColor;
+
+                        }
+                        else
+                        {
+                            // Assign the layer the ACI color 1 and a name
+                            acLyrTblRec.Color = Color.FromColorIndex(ColorMethod.ByAci, 7);
+                        }
+
+                        acLyrTblRec.Name = sLayerName;                                               
 
                         // Upgrade the Layer table for write
                         acLyrTbl.UpgradeOpen();
