@@ -163,6 +163,41 @@ namespace SsiCad
                             acTrans.Commit();
                         }
 
+                        //Création du Texte sur le claque sLayerNameT
+                        // Start a transaction
+                        using (Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
+                        {
+                            // Open the Block table for read
+                            BlockTable acBlkTbl;
+                            acBlkTbl = acTrans.GetObject(acCurDb.BlockTableId,
+                                                         OpenMode.ForRead) as BlockTable;
+
+                            // Open the Block table record Model space for write
+                            BlockTableRecord acBlkTblRec;
+                            acBlkTblRec = acTrans.GetObject(acBlkTbl[BlockTableRecord.ModelSpace],
+                                                            OpenMode.ForWrite) as BlockTableRecord;
+
+                            PromptPointResult pPtRes;
+                            PromptPointOptions pPtOpts = new PromptPointOptions("");
+                            pPtOpts.Message = "Spécifiez le point d'insertion du texte :";
+                            pPtRes = acDoc.Editor.GetPoint(pPtOpts);
+
+
+                            // Create a multiline text object
+                            MText acMText = new MText();
+                            acMText.SetDatabaseDefaults();
+                            acMText.Location = pPtRes.Value;
+                            acMText.Width = 4;
+                            acMText.Contents = string.Format("ZD{0}", pStrRes.StringResult);
+                            acMText.Layer = sLayerNameT;
+
+                            acBlkTblRec.AppendEntity(acMText);
+                            acTrans.AddNewlyCreatedDBObject(acMText, true);
+
+                            // Save the changes and dispose of the transaction
+                            acTrans.Commit();
+                        }
+
                         //Demande si l'utilisateur veut recréer une zone
                         pKeyRes = acDoc.Editor.GetKeywords(pKeyOpts);
                         if (pKeyRes.StringResult == "Non")
