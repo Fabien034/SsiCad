@@ -57,6 +57,7 @@ namespace SsiCad
             if (pStrRes.Status == PromptStatus.Cancel)
                 return;
 
+            #region Gestion des Claques
             //Création des Claques pour la ZD si il n'existe pas
             //Démarre une transaction
             string sLayerNameG;
@@ -65,6 +66,8 @@ namespace SsiCad
             
             using (Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
             {
+                
+                
                 // Open the Layer table for read
                 LayerTable acLyrTbl;
                 acLyrTbl = acTrans.GetObject(acCurDb.LayerTableId,
@@ -79,7 +82,7 @@ namespace SsiCad
                 lLayerName.Add(sLayerNameH);
                 lLayerName.Add(sLayerNameT);
                 Color acColor = new Color();
-
+                
                 if (acLyrTbl.Has(sLayerNameG) == false)
                 {
                     // Assign the layer the ACI color 1 and a name
@@ -127,7 +130,9 @@ namespace SsiCad
                 // Save the changes and dispose of the transaction
                 acTrans.Commit();
             }
-            
+            #endregion
+
+            #region Création d'une zone            
             //Création d'une zone
             PromptKeywordOptions pKeyOpts = new PromptKeywordOptions("");
             PromptResult pKeyRes;
@@ -147,13 +152,20 @@ namespace SsiCad
             bool createZone = true;
             while (createZone)
             {
+                // Exit if the user presses ESC or cancels the command
+                if (pKeyRes.Status == PromptStatus.Cancel)
+                    return;
+
                 switch (pKeyRes.StringResult)
                 {
                     case "Oui":
+                        #region Création de la polyligne                        
                         //Création d'une Polyligne sur le calque sLayerNameG
                         Polyline acPline = new Polyline();
                         acPline = Create_Pline(sLayerNameG);
+                        #endregion
 
+                        #region Création de la hachure                        
                         //Création d'une hachure solid associé à la polyligne sur le calque sLayerNameH
                         //Démarre une transaction
                         using (Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
@@ -185,13 +197,15 @@ namespace SsiCad
                                 acHatch.Layer = sLayerNameH;
                                 acHatch.Associative = true;
                                 acHatch.AppendLoop(HatchLoopTypes.Outermost, acObjIdColl);
-                                acHatch.EvaluateHatch(true);
+                                acHatch.EvaluateHatch(true);                                
                             }
 
                             // Save the changes and dispose of the transaction
                             acTrans.Commit();
                         }
+                        #endregion
 
+                        #region Création du Texte                                               
                         //Création du Texte sur le claque sLayerNameT
                         // Start a transaction
                         using (Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
@@ -211,11 +225,19 @@ namespace SsiCad
                             pPtOpts.Message = "Spécifiez le point d'insertion du texte :";
                             pPtRes = acDoc.Editor.GetPoint(pPtOpts);
 
+                            string sTxtStyle = acCurDb.Textstyle.ToString();
+
+                            //Récupère l'unité d'insertion
+                            UnitsValue insunits = acCurDb.Insunits;
+
+                            
+
 
                             // Create a multiline text object
                             MText acMText = new MText();
                             acMText.SetDatabaseDefaults();
                             acMText.Location = pPtRes.Value;
+                            acMText.Annotative = AnnotativeStates.True;
                             acMText.Width = 4;
                             acMText.Contents = string.Format("ZD{0}", pStrRes.StringResult);
                             acMText.Layer = sLayerNameT;
@@ -226,6 +248,7 @@ namespace SsiCad
                             // Save the changes and dispose of the transaction
                             acTrans.Commit();
                         }
+                        #endregion
 
                         //Demande si l'utilisateur veut recréer une zone
                         pKeyRes = acDoc.Editor.GetKeywords(pKeyOpts);
@@ -241,6 +264,7 @@ namespace SsiCad
                         return;
                 }
             }
+            #endregion
 
         }
 
